@@ -48,7 +48,10 @@ def generate_progress_bar(used_percentage):
 def format_tokens(tokens):
     """格式化token数量 - 返回使用百分比和进度条（基于160k限制）"""
     # 基于160k（80% * 200k）计算使用百分比
-    used_percentage = min(100, (tokens * 100) // 160000)
+    used_percentage = min(100, round((tokens * 100) / 160000))
+    
+    # 调试输出具体数值
+    debug_log(f"蓝色进度条计算: tokens={tokens}, 160k限制, 百分比={(tokens * 100) / 160000:.2f}%, 四舍五入={used_percentage}%")
     
     # 直接从缓存中获取进度条，避免函数调用开销
     progress_bar = PROGRESS_BARS.get(used_percentage, "▒▒▒▒▒▒▒▒▒▒")
@@ -135,34 +138,35 @@ def format_cost(cost):
     if cost == "N/A" or not isinstance(cost, (int, float)):
         return "N/A"
     
-    cost = int(cost)
+    # 转换为美分单位（乘以100），便于整数计算和格式化
+    cost_cents = int(cost * 100)
     
-    # 格式化规则：
-    # < 1000: 显示原数字
-    # 1000-9999: 显示x.xk
-    # 10000-999999: 显示xxk
-    # >= 1000000: 显示x.xm或xxm
+    # 格式化规则（基于美分）：
+    # < 100美分(1美元): 显示美分，如 "50¢"
+    # 100-999美分(1-9.99美元): 显示美元，如 "$1.50"
+    # >= 1000美分(10美元): 使用k、m进位
     
-    if cost < 1000:
-        return str(cost)
-    elif cost < 10000:
-        # 1000-9999: x.xk
+    if cost_cents < 100:  # 小于1美元
+        return f"{cost_cents}¢"
+    elif cost_cents < 1000:  # 1-9.99美元
+        return f"${cost:.2f}"
+    elif cost < 10:  # 10-99.99美元
+        return f"${cost:.1f}"
+    elif cost < 1000:  # 100-999美元
+        return f"${int(cost)}"
+    elif cost < 10000:  # 1k-9.9k美元
         k_value = cost / 1000
-        return f"{k_value:.1f}k"
-    elif cost < 1000000:
-        # 10000-999999: xxk
+        return f"${k_value:.1f}k"
+    elif cost < 1000000:  # 10k-999k美元
         k_value = cost // 1000
-        return f"{k_value}k"
-    else:
-        # >= 1000000: x.xm或xxm
+        return f"${k_value}k"
+    else:  # >= 1m美元
         if cost < 10000000:
-            # 1m-9.9m: x.xm
             m_value = cost / 1000000
-            return f"{m_value:.1f}m"
+            return f"${m_value:.1f}m"
         else:
-            # >= 10m: xxm
             m_value = cost // 1000000
-            return f"{m_value}m"
+            return f"${m_value}m"
 
 def get_session_limit_progress():
     """获取会话限额进度（橙色进度条）"""
@@ -171,9 +175,9 @@ def get_session_limit_progress():
         return "\033[38;5;208m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
     
     try:
-        # 获取会话限额信息
+        # 获取会话限额信息 - 使用20M token限制来获取tokenLimitStatus
         result = subprocess.run(
-            ['ccusage', 'blocks', '--token-limit', 'max', '--active', '-j'],
+            ['ccusage', 'blocks', '--token-limit', '20000000', '--active', '-j'],
             capture_output=True,
             text=True,
             timeout=5,
@@ -186,12 +190,35 @@ def get_session_limit_progress():
             blocks = data.get('blocks', [])
             
             if blocks and blocks[0].get('isActive'):
-                token_limit_status = blocks[0].get('tokenLimitStatus', {})
+                block = blocks[0]
+                token_limit_status = block.get('tokenLimitStatus', {})
                 
-                if 'percentUsed' in token_limit_status:
-                    percent_used = int(token_limit_status['percentUsed'])
-                    progress_bar = PROGRESS_BARS.get(percent_used, "▒▒▒▒▒▒▒▒▒▒")
-                    return f"\033[38;5;208m{progress_bar} {percent_used}%\033[0m"
+                # 使用当前已使用的token数计算五小时限额使用率
+                if 'limit' in token_limit_status:
+                    limit = token_limit_status.get('limit', 0)
+                    total_tokens = block.get('totalTokens', 0)
+                    
+                    if limit > 0 and total_tokens > 0:
+                        percent_used_raw = (total_tokens * 100) / limit
+                        percent_used = min(100, round(percent_used_raw))
+                        
+                        # 调试输出具体数值
+                        debug_log(f"橙色进度条计算(五小时限额): total_tokens={total_tokens}, limit={limit}, 百分比={percent_used_raw:.2f}%, 四舍五入={percent_used}%")
+                        progress_bar = PROGRESS_BARS.get(percent_used, "▒▒▒▒▒▒▒▒▒▒")
+                        return f"\033[38;5;208m{progress_bar} {percent_used}%\033[0m"
+                
+                # 备用方案：使用projection数据
+                else:
+                    total_tokens = block.get('totalTokens', 0)
+                    projection = block.get('projection', {})
+                    projected_tokens = projection.get('totalTokens', 0)
+                    
+                    if projected_tokens > 0 and total_tokens > 0:
+                        percent_used = min(100, round((total_tokens * 100) / projected_tokens))
+                        # 调试输出具体数值
+                        debug_log(f"橙色进度条计算(projection): total_tokens={total_tokens}, projected_tokens={projected_tokens}, 百分比={(total_tokens * 100) / projected_tokens:.2f}%, 四舍五入={percent_used}%")
+                        progress_bar = PROGRESS_BARS.get(percent_used, "▒▒▒▒▒▒▒▒▒▒")
+                        return f"\033[38;5;208m{progress_bar} {percent_used}%\033[0m"
         
         return "\033[38;5;208m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
         
@@ -202,29 +229,42 @@ def get_ccusage_data():
     """获取ccusage的费用数据"""
     # 检查ccusage是否可用
     if not shutil.which('ccusage'):
+        debug_log("ccusage命令不可用")
         return None, None, []
     
     try:
-        # 获取当日费用
+        # 获取过去30天的日常费用数据
+        from datetime import datetime, timedelta
+        
+        # 计算30天前的日期
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+        
         result = subprocess.run(
-            ['ccusage', 'daily', '-j'],
+            ['ccusage', 'daily', '--since', thirty_days_ago, '-j'],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=10,  # 增加超时时间，因为可能有更多数据
             encoding='utf-8',
-            shell=True  # Windows compatibility for .CMD files
+            shell=True
         )
         
         daily_data = []
         daily_cost = None
         
+        debug_log(f"ccusage daily 返回码: {result.returncode}")
+        debug_log(f"ccusage daily 输出: {result.stdout[:200]}...")
+        
         if result.returncode == 0:
             data = json.loads(result.stdout)
             daily_data = data.get('daily', [])
+            debug_log(f"获取到 {len(daily_data)} 天的数据")
+            
             if daily_data:
                 daily_cost = daily_data[-1].get('totalCost')
+                debug_log(f"今日费用原始值: {daily_cost}")
                 if daily_cost is not None:
-                    daily_cost = int(float(daily_cost))
+                    daily_cost = float(daily_cost)  # 保持浮点数精度
+                    debug_log(f"今日费用转换后: {daily_cost}")
         
         # 获取当月总费用
         monthly_result = subprocess.run(
@@ -237,17 +277,25 @@ def get_ccusage_data():
         )
         
         monthly_cost = None
+        debug_log(f"ccusage monthly 返回码: {monthly_result.returncode}")
+        
         if monthly_result.returncode == 0:
             data = json.loads(monthly_result.stdout)
             monthly_data = data.get('monthly', [])
+            debug_log(f"月度数据: {monthly_data}")
+            
             if monthly_data:
                 monthly_cost = monthly_data[-1].get('totalCost')
+                debug_log(f"本月费用原始值: {monthly_cost}")
                 if monthly_cost is not None:
-                    monthly_cost = int(float(monthly_cost))
+                    monthly_cost = float(monthly_cost)  # 保持浮点数精度
+                    debug_log(f"本月费用转换后: {monthly_cost}")
         
+        debug_log(f"最终返回: daily_cost={daily_cost}, monthly_cost={monthly_cost}, daily_data长度={len(daily_data)}")
         return daily_cost, monthly_cost, daily_data
             
-    except Exception:
+    except Exception as e:
+        debug_log(f"获取ccusage数据时出错: {e}")
         return None, None, []
 
 def calculate_percentage_diff(daily_cost, daily_data):
@@ -314,17 +362,28 @@ def main():
     try:
         # 从stdin读取JSON输入
         input_data = sys.stdin.read()
+        debug_log(f"读取到输入数据: {input_data[:100]}...")
+        
         if not input_data:
+            debug_log("没有输入数据")
             print("[Test] Unified Status Line Working")
             return
         
         data = json.loads(input_data)
+        debug_log(f"解析JSON成功: {data}")
         
         # 获取各项信息
         model = get_model_name(data)
+        debug_log(f"模型名称: {model}")
+        
         context_tokens = get_session_tokens(data)  # 蓝色进度条（会话上下文）
+        debug_log(f"上下文进度条: {context_tokens}")
+        
         limit_tokens = get_session_limit_progress()  # 橙色进度条（会话限额）
+        debug_log(f"限额进度条: {limit_tokens}")
+        
         cost = get_cost()
+        debug_log(f"费用信息: {cost}")
         
         # 使用ANSI颜色代码格式化输出
         # 模型名称 - 蓝色
@@ -335,11 +394,13 @@ def main():
         # 输出格式化的状态行: 模型名字 + 蓝色进度条 + 橙色进度条 + 费用信息
         print(f"{model_colored}  {context_tokens}  {limit_tokens}  {cost_colored}")
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         # JSON解析失败时的默认输出
+        debug_log(f"JSON解析失败: {e}")
         print("[Test] Unified Status Line Working")
     except Exception as e:
         # 其他错误时的默认输出
+        debug_log(f"发生异常: {e}")
         print(f"[Error] Status Line Error: {str(e)}", file=sys.stderr)
         print("[Test] Unified Status Line Working")
 
