@@ -23,9 +23,29 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', '0') == '1'
 
 # 预生成所有可能的进度条状态，避免运行时重复计算
-PROGRESS_BARS = {
-    i: "▓" * (i // 10) + "░" * (10 - i // 10) for i in range(0, 101)
-}
+# 使用6级点阵字符实现精细渐变：0个点到6个点表示不同进度（最多三行点）
+# 100%映射到60个点（10个字符 × 6个点/字符）
+DOT_CHARS = ['⠀', '⠁', '⠃', '⠇', '⠏', '⠟', '⠿']  # 0-6个点（最多三行）
+PROGRESS_BARS = {}
+
+# 生成精细进度条缓存
+for percentage in range(0, 101):
+    total_dots = int((percentage * 60) / 100)  # 总共60个点
+    full_chars = total_dots // 6  # 完整字符数（6个点）
+    remaining_dots = total_dots % 6  # 剩余点数
+    
+    # 构建进度条 - 纯彩色点阵
+    progress = DOT_CHARS[6] * full_chars  # 满点字符（⠿）
+    if remaining_dots > 0 and full_chars < 10:
+        progress += DOT_CHARS[remaining_dots]  # 部分点字符
+        empty_chars = 10 - full_chars - 1
+    else:
+        empty_chars = 10 - full_chars
+    
+    # 添加空字符（灰色）
+    progress += "\033[38;5;240m" + DOT_CHARS[0] * empty_chars + "\033[0m"
+    
+    PROGRESS_BARS[percentage] = progress
 
 def debug_log(message):
     """调试日志输出"""
@@ -43,21 +63,21 @@ def generate_progress_bar(used_percentage):
     """生成进度条 - 使用预生成的缓存提升性能"""
     # 限制百分比范围并使用预生成的进度条
     percentage = min(100, max(0, used_percentage))
-    return PROGRESS_BARS.get(percentage, "▒▒▒▒▒▒▒▒▒▒")
+    return PROGRESS_BARS.get(percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
 
 def format_tokens(tokens):
-    """格式化token数量 - 返回使用百分比和进度条（基于160k限制）"""
-    # 基于160k（80% * 200k）计算使用百分比
-    used_percentage = min(100, round((tokens * 100) / 160000))
+    """格式化token数量 - 返回使用百分比和进度条（基于200k限制）"""
+    # 基于200k计算使用百分比
+    used_percentage = min(100, round((tokens * 100) / 200000))
     
     # 调试输出具体数值
-    debug_log(f"蓝色进度条计算: tokens={tokens}, 160k限制, 百分比={(tokens * 100) / 160000:.2f}%, 四舍五入={used_percentage}%")
+    debug_log(f"蓝色进度条计算: tokens={tokens}, 200k限制, 百分比={(tokens * 100) / 200000:.2f}%, 四舍五入={used_percentage}%")
     
     # 直接从缓存中获取进度条，避免函数调用开销
-    progress_bar = PROGRESS_BARS.get(used_percentage, "▒▒▒▒▒▒▒▒▒▒")
+    progress_bar = PROGRESS_BARS.get(used_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
     
     # 返回蓝色的进度条（会话上下文进度）
-    return f"\033[0;34m{progress_bar} {used_percentage}%\033[0m"
+    return f"\033[0;34m{progress_bar}\033[0m \033[0;34m{used_percentage}%\033[0m"
 
 def process_transcript(transcript_path):
     """处理transcript文件，提取token使用量"""
@@ -116,7 +136,7 @@ def get_session_tokens(data):
         
         if not transcript_path:
             debug_log("错误: transcript_path为空")
-            return "\033[0;34m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+            return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
         
         # 处理transcript文件
         total_tokens = process_transcript(transcript_path)
@@ -126,53 +146,39 @@ def get_session_tokens(data):
             debug_log(f"最终输出: {formatted_tokens}")
             return formatted_tokens
         else:
-            debug_log("最终输出: ▒▒▒▒▒▒▒▒▒▒ 0% (未找到有效token数据)")
-            return "\033[0;34m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+            debug_log("最终输出: \033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m 0% (未找到有效token数据)")
+            return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
             
     except Exception as e:
         debug_log(f"发生错误: {e}")
-        return "\033[0;34m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+        return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
 
-def format_cost(cost):
-    """格式化费用显示（添加k和m进位）"""
+def format_cost(cost, with_dollar_sign=True):
+    """格式化费用显示（统一显示一位小数）"""
     if cost == "N/A" or not isinstance(cost, (int, float)):
         return "N/A"
     
-    # 转换为美分单位（乘以100），便于整数计算和格式化
-    cost_cents = int(cost * 100)
-    
-    # 格式化规则（基于美分）：
-    # < 100美分(1美元): 显示美分，如 "50¢"
-    # 100-999美分(1-9.99美元): 显示美元，如 "$1.50"
-    # >= 1000美分(10美元): 使用k、m进位
-    
-    if cost_cents < 100:  # 小于1美元
-        return f"{cost_cents}¢"
-    elif cost_cents < 1000:  # 1-9.99美元
-        return f"${cost:.2f}"
-    elif cost < 10:  # 10-99.99美元
-        return f"${cost:.1f}"
-    elif cost < 1000:  # 100-999美元
-        return f"${int(cost)}"
-    elif cost < 10000:  # 1k-9.9k美元
+    # 统一格式：一位小数
+    if cost < 1000:  # 小于1000美元
+        formatted = f"{cost:.1f}"
+    elif cost < 1000000:  # 1k-999k美元
         k_value = cost / 1000
-        return f"${k_value:.1f}k"
-    elif cost < 1000000:  # 10k-999k美元
-        k_value = cost // 1000
-        return f"${k_value}k"
+        formatted = f"{k_value:.1f}k"
     else:  # >= 1m美元
-        if cost < 10000000:
-            m_value = cost / 1000000
-            return f"${m_value:.1f}m"
-        else:
-            m_value = cost // 1000000
-            return f"${m_value}m"
+        m_value = cost / 1000000
+        formatted = f"{m_value:.1f}m"
+    
+    # 根据参数决定是否添加美元符号
+    if with_dollar_sign:
+        return f"${formatted}"
+    else:
+        return formatted
 
 def get_session_limit_progress():
     """获取会话限额进度（橙色进度条）"""
     # 检查ccusage是否可用
     if not shutil.which('ccusage'):
-        return "\033[38;5;208m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
     
     try:
         # 获取会话限额信息 - 使用20M token限制来获取tokenLimitStatus
@@ -204,8 +210,8 @@ def get_session_limit_progress():
                         
                         # 调试输出具体数值
                         debug_log(f"橙色进度条计算(五小时限额): total_tokens={total_tokens}, limit={limit}, 百分比={percent_used_raw:.2f}%, 四舍五入={percent_used}%")
-                        progress_bar = PROGRESS_BARS.get(percent_used, "▒▒▒▒▒▒▒▒▒▒")
-                        return f"\033[38;5;208m{progress_bar} {percent_used}%\033[0m"
+                        progress_bar = PROGRESS_BARS.get(percent_used, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+                        return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percent_used}%\033[0m"
                 
                 # 备用方案：使用projection数据
                 else:
@@ -217,13 +223,13 @@ def get_session_limit_progress():
                         percent_used = min(100, round((total_tokens * 100) / projected_tokens))
                         # 调试输出具体数值
                         debug_log(f"橙色进度条计算(projection): total_tokens={total_tokens}, projected_tokens={projected_tokens}, 百分比={(total_tokens * 100) / projected_tokens:.2f}%, 四舍五入={percent_used}%")
-                        progress_bar = PROGRESS_BARS.get(percent_used, "▒▒▒▒▒▒▒▒▒▒")
-                        return f"\033[38;5;208m{progress_bar} {percent_used}%\033[0m"
+                        progress_bar = PROGRESS_BARS.get(percent_used, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+                        return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percent_used}%\033[0m"
         
-        return "\033[38;5;208m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
         
     except Exception:
-        return "\033[38;5;208m▒▒▒▒▒▒▒▒▒▒ 0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
 
 def get_ccusage_data():
     """获取ccusage的费用数据"""
@@ -347,11 +353,11 @@ def get_cost():
         if daily_cost != "N/A":
             percentage_diff = calculate_percentage_diff(daily_cost, daily_data)
         
-        # 格式化显示费用
-        daily_cost_formatted = format_cost(daily_cost)
-        monthly_cost_formatted = format_cost(monthly_cost)
+        # 格式化显示费用 - 只有第一个有美元符号
+        daily_cost_formatted = format_cost(daily_cost, with_dollar_sign=True)
+        monthly_cost_formatted = format_cost(monthly_cost, with_dollar_sign=False)
         
-        # 输出格式：当日费用 / 当月总费用 [+/-X%]
+        # 输出格式：$当日费用/当月总费用 [+/-X%]
         return f"{daily_cost_formatted}/{monthly_cost_formatted}{percentage_diff}"
         
     except Exception as e:
