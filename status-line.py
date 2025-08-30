@@ -113,11 +113,11 @@ def get_session_tokens(data):
         total_tokens = process_transcript(transcript_path)
         
         if total_tokens > 0:
-            # 基于200k计算使用百分比
-            actual_percentage = round((total_tokens * 100) / 200000)
+            # 基于160k计算使用百分比
+            actual_percentage = round((total_tokens * 100) / 160000)
             display_percentage = min(100, actual_percentage)
             
-            debug_log(f"蓝色进度条计算: tokens={total_tokens}, 200k限制, 实际百分比={actual_percentage}%, 显示百分比={display_percentage}%")
+            debug_log(f"蓝色进度条计算: tokens={total_tokens}, 160k限制, 实际百分比={actual_percentage}%, 显示百分比={display_percentage}%")
             
             progress_bar = PROGRESS_BARS.get(display_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
             
