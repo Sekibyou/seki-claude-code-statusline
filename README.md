@@ -4,7 +4,8 @@
 
 > 💡 **灵感来源：** [neo-claude-code-statusline](https://github.com/neorena-dev/neo-claude-code-statusline)
 
-<img width="488" height="98" alt="preview" src="https://github.com/user-attachments/assets/58f72622-1088-40c8-8c4f-ee6cae5b6318" />
+<img width="527" height="152" alt="preview" src="https://github.com/user-attachments/assets/72c4b775-570f-44a1-b7e8-f4c6a1433044" />
+
 
   
 ## 功能特性
