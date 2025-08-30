@@ -11,6 +11,11 @@ import subprocess
 import shutil
 import io
 from datetime import datetime, timedelta
+try:
+    import pytz
+    PYTZ_AVAILABLE = True
+except ImportError:
+    PYTZ_AVAILABLE = False
 
 # 设置输出编码为UTF-8
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -107,7 +112,7 @@ def get_session_tokens(data):
         
         if not transcript_path:
             debug_log("错误: transcript_path为空")
-            return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
+            return "\033[0;38;2;91;155;214m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;38;2;91;155;214m⠀⠀0%\033[0m"
         
         # 处理transcript文件
         total_tokens = process_transcript(transcript_path)
@@ -121,21 +126,26 @@ def get_session_tokens(data):
             
             progress_bar = PROGRESS_BARS.get(display_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
             
-            # 返回蓝色的进度条，百分比显示实际值
-            return f"\033[0;34m{progress_bar}\033[0m \033[0;34m{actual_percentage}%\033[0m"
+            # 返回蓝色的进度条，百分比显示实际值（动态对齐到3位数宽度）
+            percentage_padding = ""
+            if actual_percentage < 10:
+                percentage_padding = "⠀⠀"  # 两个占位符
+            elif actual_percentage < 100:
+                percentage_padding = "⠀"    # 一个占位符
+            return f"\033[0;38;2;91;155;214m{progress_bar}\033[0m \033[0;38;2;91;155;214m{percentage_padding}{actual_percentage}%\033[0m"
         else:
-            return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
+            return "\033[0;38;2;91;155;214m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;38;2;91;155;214m⠀⠀0%\033[0m"
             
     except Exception as e:
         debug_log(f"发生错误: {e}")
-        return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
+        return "\033[0;38;2;91;155;214m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;38;2;91;155;214m⠀⠀0%\033[0m"
 
 def get_blocks_comparison():
     """获取blocks token比较（橙色进度条）"""
     # 检查ccusage是否可用
     if not shutil.which('ccusage'):
         debug_log("ccusage命令不可用")
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m⠀⠀0%\033[0m"
     
     try:
         result = subprocess.run(
@@ -153,7 +163,7 @@ def get_blocks_comparison():
             
             if not blocks:
                 debug_log("没有blocks数据")
-                return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+                return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m⠀⠀0%\033[0m"
             
             # 找到当前活跃的block
             active_block = None
@@ -169,7 +179,7 @@ def get_blocks_comparison():
             
             if active_block is None:
                 debug_log("没有找到活跃block")
-                return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+                return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m⠀⠀0%\033[0m"
             
             active_tokens = active_block.get('totalTokens', 0)
             
@@ -184,15 +194,110 @@ def get_blocks_comparison():
             
             progress_bar = PROGRESS_BARS.get(display_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
             
-            # 返回橙色的进度条，百分比显示实际值
-            return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{actual_percentage}%\033[0m"
+            # 返回橙色的进度条，百分比显示实际值（动态对齐到3位数宽度）
+            percentage_padding = ""
+            if actual_percentage < 10:
+                percentage_padding = "⠀⠀"  # 两个占位符
+            elif actual_percentage < 100:
+                percentage_padding = "⠀"    # 一个占位符
+            return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percentage_padding}{actual_percentage}%\033[0m"
         
         # 默认返回值
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m⠀⠀0%\033[0m"
         
     except Exception as e:
         debug_log(f"获取blocks信息时出错: {e}")
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m⠀⠀0%\033[0m"
+
+def get_active_block_time_range():
+    """获取活跃block的时间范围，转换为本地时区显示"""
+    # 检查ccusage是否可用
+    if not shutil.which('ccusage'):
+        debug_log("ccusage命令不可用")
+        return "N/A"
+    
+    try:
+        result = subprocess.run(
+            ['ccusage', 'blocks', '--active', '-j'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding='utf-8',
+            shell=True
+        )
+        
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            blocks = data.get('blocks', [])
+            
+            # 找到活跃的block
+            for block in blocks:
+                if block.get('isActive', False):
+                    start_time_str = block.get('startTime')
+                    end_time_str = block.get('endTime')
+                    
+                    if start_time_str and end_time_str:
+                        # 解析UTC时间
+                        start_utc = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                        end_utc = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                        
+                        # 自动使用系统本地时区
+                        start_local = start_utc.astimezone()
+                        end_local = end_utc.astimezone()
+                        
+                        # 获取时区显示名称 - 使用UTC偏移量自动识别
+                        try:
+                            # 获取UTC偏移量（单位：秒）
+                            utc_offset = start_local.utcoffset().total_seconds() / 3600
+                            
+                            # 根据UTC偏移量自动识别常见时区
+                            if utc_offset == 9:  # UTC+9
+                                tz_display = 'Tokyo'
+                            elif utc_offset == 8:  # UTC+8
+                                tz_display = 'Beijing'
+                            elif utc_offset == -5:  # UTC-5
+                                tz_display = 'NewYork'
+                            elif utc_offset == -4:  # UTC-4 (EDT)
+                                tz_display = 'NewYork'
+                            elif utc_offset == -8:  # UTC-8
+                                tz_display = 'LosAngeles'
+                            elif utc_offset == -7:  # UTC-7 (PDT)
+                                tz_display = 'LosAngeles'
+                            elif utc_offset == 0:  # UTC+0
+                                tz_display = 'London'
+                            elif utc_offset == 1:  # UTC+1 (CET)
+                                tz_display = 'Berlin'
+                            elif utc_offset == 2:  # UTC+2 (CEST)
+                                tz_display = 'Berlin'
+                            elif utc_offset == 5.5:  # UTC+5.5
+                                tz_display = 'NewDelhi'
+                            elif utc_offset == 10:  # UTC+10
+                                tz_display = 'Sydney'
+                            else:
+                                # 对于其他时区，显示UTC偏移量
+                                if utc_offset >= 0:
+                                    tz_display = f'UTC+{int(utc_offset)}'
+                                else:
+                                    tz_display = f'UTC{int(utc_offset)}'
+                        except:
+                            tz_display = 'Local'
+                        
+                        # 格式化时间显示（去掉小时前导零）
+                        start_formatted = start_local.strftime('%H:%M').lstrip('0') or '0:' + start_local.strftime('%M')
+                        end_formatted = end_local.strftime('%H:%M').lstrip('0') or '0:' + end_local.strftime('%M')
+                        
+                        debug_log(f"时间范围: {tz_display} {start_formatted}-{end_formatted}")
+                        return f"{tz_display} {start_formatted}~{end_formatted}"
+            
+            debug_log("没有找到活跃block")
+            return "N/A"
+        
+        debug_log(f"ccusage命令失败: {result.returncode}")
+        return "N/A"
+        
+    except Exception as e:
+        debug_log(f"获取时间范围时出错: {e}")
+        return "N/A"
 
 def format_cost(cost):
     """格式化费用显示"""
@@ -213,7 +318,7 @@ def get_cost_info():
     # 检查ccusage是否可用
     if not shutil.which('ccusage'):
         debug_log("ccusage命令不可用")
-        return "N/A"
+        return "N/A", "N/A"
     
     try:
         # 获取今日费用
@@ -260,15 +365,11 @@ def get_cost_info():
         
         debug_log(f"费用信息: 今日={daily_formatted}, 本月={monthly_formatted}")
         
-        # 输出格式：$今日/本月
-        if daily_formatted != "N/A":
-            return f"${daily_formatted}/{monthly_formatted}"
-        else:
-            return "N/A"
+        return daily_formatted, monthly_formatted
         
     except Exception as e:
         debug_log(f"获取费用信息时出错: {e}")
-        return "N/A"
+        return "N/A", "N/A"
 
 def main():
     """主函数"""
@@ -298,17 +399,35 @@ def main():
         debug_log(f"橙色进度条: {blocks_comparison}")
         
         # 获取费用信息（黄色）
-        cost = get_cost_info()
-        debug_log(f"费用信息: {cost}")
+        daily_cost, monthly_cost = get_cost_info()
+        debug_log(f"费用信息: 今日={daily_cost}, 本月={monthly_cost}")
+        
+        # 获取活跃block时间范围
+        time_range = get_active_block_time_range()
+        debug_log(f"时间范围: {time_range}")
         
         # 模型名称 - 蓝色
         model_colored = f"\033[0;38;2;91;155;214m{model}\033[0m"
         
         # 费用信息 - 黄色
-        cost_colored = f"\033[0;38;5;178m{cost}\033[0m"
+        cost_info = f"${daily_cost}/{monthly_cost} (d/m)" if daily_cost != "N/A" else "N/A"
+        cost_colored = f"\033[0;38;5;178m{cost_info}\033[0m"
         
-        # 最终输出：模型 + 会话tokens(蓝色) + block比较(橙色) + 费用(黄色)
-        print(f"{model_colored}  {context_tokens}  {blocks_comparison}  {cost_colored}")
+        # 计算模型名称的显示宽度（用于对齐）
+        model_display_width = len(model) + 2  # 模型名称 + 两个空格
+        
+        # 第一行：模型 + 会话tokens(蓝色) + 费用(黄色)
+        first_line = f"{model_colored}  {context_tokens}  {cost_colored}"
+        
+        # 第二行：用不可见字符对齐 + blocks比较(橙色) + 时间范围（橙色）
+        time_colored = f"\033[38;5;208m{time_range}\033[0m"
+        # 使用盲文空格字符来对齐（盲文字符宽度为半角，所以需要乘以2）
+        padding = "\033[0m" + "⠀" * model_display_width
+        second_line = f"{padding}{blocks_comparison}  {time_colored}"
+        
+        # 输出两行
+        print(first_line)
+        print(second_line)
         
     except json.JSONDecodeError as e:
         debug_log(f"JSON解析失败: {e}")
