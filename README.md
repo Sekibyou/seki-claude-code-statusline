@@ -4,7 +4,7 @@
 
 > 💡 **灵感来源：** [neo-claude-code-statusline](https://github.com/neorena-dev/neo-claude-code-statusline)
 
-<img width="527" height="152" alt="preview" src="https://github.com/user-attachments/assets/72c4b775-570f-44a1-b7e8-f4c6a1433044" />
+<img width="444" height="141" alt="preview" src="https://github.com/user-attachments/assets/b7ae5ab7-a4aa-4b70-9b0e-17a07190684f" />
 
 
   
