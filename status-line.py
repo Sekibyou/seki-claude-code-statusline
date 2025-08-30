@@ -15,12 +15,118 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import calendar
+import pytz
+import time
 
 # 设置输出编码为UTF-8
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-DEBUG_TOKENS = os.environ.get('DEBUG_TOKENS', '0') == '1'
+# 临时调试函数（稍后会重新定义）
+def debug_log(message):
+    pass
+
+# 加载.env配置
+def load_env_config():
+    """加载.env配置文件"""
+    config = {}
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        config[key.strip()] = value.strip()
+        except Exception as e:
+            debug_log(f"读取.env文件时出错: {e}")
+    return config
+
+# 加载配置
+ENV_CONFIG = load_env_config()
+
+def get_system_timezone():
+    """获取系统时区"""
+    try:
+        # 方法1: 使用datetime获取本地时区偏移（最可靠的方法）
+        local_time = datetime.now()
+        utc_time = datetime.utcnow()
+        offset = local_time - utc_time
+        offset_hours = offset.total_seconds() / 3600
+        
+        debug_log(f"系统时区偏移: UTC{offset_hours:+.1f}小时")
+        
+        # 根据偏移量推测常见时区
+        timezone_map = {
+            8.0: 'Asia/Shanghai',         # UTC+8 中国/新加坡
+            9.0: 'Asia/Tokyo',            # UTC+9 日本/韩国
+            -5.0: 'America/New_York',     # UTC-5 美东
+            -8.0: 'America/Los_Angeles',  # UTC-8 美西  
+            0.0: 'UTC',                   # UTC+0 格林威治
+            1.0: 'Europe/London',         # UTC+1 英国夏时制
+            -6.0: 'America/Chicago',      # UTC-6 美中
+        }
+        
+        # 查找最接近的时区
+        best_match = None
+        min_diff = float('inf')
+        
+        for offset_key, timezone_name in timezone_map.items():
+            diff = abs(offset_hours - offset_key)
+            if diff < min_diff and diff < 0.5:  # 允许30分钟的误差
+                min_diff = diff
+                best_match = timezone_name
+        
+        if best_match:
+            debug_log(f"自动检测时区: {best_match}")
+            return best_match
+        
+        # 方法2: 尝试Windows特定的时区检测
+        try:
+            import subprocess
+            result = subprocess.run(['tzutil', '/g'], capture_output=True, text=True, timeout=3)
+            if result.returncode == 0:
+                win_tz = result.stdout.strip()
+                debug_log(f"Windows时区: {win_tz}")
+                
+                # Windows时区到IANA时区的映射
+                win_tz_map = {
+                    'China Standard Time': 'Asia/Shanghai',
+                    'Tokyo Standard Time': 'Asia/Tokyo', 
+                    'Korea Standard Time': 'Asia/Seoul',
+                    'Eastern Standard Time': 'America/New_York',
+                    'Pacific Standard Time': 'America/Los_Angeles',
+                    'UTC': 'UTC',
+                }
+                
+                if win_tz in win_tz_map:
+                    debug_log(f"映射到IANA时区: {win_tz_map[win_tz]}")
+                    return win_tz_map[win_tz]
+        except:
+            pass
+            
+    except Exception as e:
+        debug_log(f"获取系统时区失败: {e}")
+    
+    # 默认返回UTC
+    debug_log("使用默认时区: UTC")
+    return 'UTC'
+
+# 配置项
+DEBUG_TOKENS = ENV_CONFIG.get('DEBUG_TOKENS', '0') == '1'
+SUBSCRIPTION_TYPE = ENV_CONFIG.get('SUBSCRIPTION_TYPE', '').lower()
+TIMEZONE = ENV_CONFIG.get('TIMEZONE', '').strip() or get_system_timezone()
+
+# 会员限额映射
+SUBSCRIPTION_LIMITS = {
+    'pro': 20000000,      # 20M
+    'max5x': 100000000,   # 100M  
+    'max20x': 400000000,  # 400M
+}
+
+# 判断是否为会员模式
+IS_SUBSCRIPTION_MODE = SUBSCRIPTION_TYPE in SUBSCRIPTION_LIMITS
 
 # 预生成所有可能的进度条状态，避免运行时重复计算
 # 使用6级点阵字符实现精细渐变：0个点到6个点表示不同进度（最多三行点）
@@ -174,16 +280,69 @@ def format_cost(cost, with_dollar_sign=True):
     else:
         return formatted
 
-def get_session_limit_progress():
-    """获取会话限额进度（橙色进度条）"""
+def get_city_name_from_timezone(timezone_name):
+    """从时区名称获取城市名称"""
+    city_mapping = {
+        'Asia/Shanghai': 'Shanghai',
+        'Asia/Tokyo': 'Tokyo', 
+        'Asia/Seoul': 'Seoul',
+        'America/New_York': 'NYC',
+        'America/Los_Angeles': 'LA',
+        'America/Chicago': 'Chicago',
+        'Europe/London': 'London',
+        'UTC': 'UTC',
+    }
+    
+    # 如果有直接映射就使用
+    if timezone_name in city_mapping:
+        return city_mapping[timezone_name]
+    
+    # 否则从时区名称中提取城市名（如 Asia/Bangkok -> Bangkok）
+    try:
+        if '/' in timezone_name:
+            return timezone_name.split('/')[-1]
+        return timezone_name
+    except:
+        return 'Local'
+
+def format_session_time(start_time, end_time, timezone_name):
+    """格式化会话时间段显示（如 Tokyo 15:00~20:00）"""
+    try:
+        # 解析ISO时间
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        
+        # 转换到指定时区
+        target_tz = pytz.timezone(timezone_name)
+        start_local = start_dt.astimezone(target_tz)
+        end_local = end_dt.astimezone(target_tz)
+        
+        # 格式化为 15:00~20:00 格式（24小时制）
+        start_str = start_local.strftime('%H:%M')
+        end_str = end_local.strftime('%H:%M')
+        
+        # 获取城市名称
+        city_name = get_city_name_from_timezone(timezone_name)
+        
+        return f"{city_name} {start_str}~{end_str}"
+        
+    except Exception as e:
+        debug_log(f"格式化时间出错: {e}")
+        return "N/A"
+
+def get_subscription_info():
+    """获取会员模式的限额进度和时间信息"""
     # 检查ccusage是否可用
     if not shutil.which('ccusage'):
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m", "\033[38;5;208mN/A\033[0m"
     
     try:
-        # 获取会话限额信息 - 使用20M token限制来获取tokenLimitStatus
+        # 获取用户配置的限额
+        user_limit = SUBSCRIPTION_LIMITS.get(SUBSCRIPTION_TYPE, 100000000)
+        
+        # 使用配置的限额获取tokenLimitStatus
         result = subprocess.run(
-            ['ccusage', 'blocks', '--token-limit', '20000000', '--active', '-j'],
+            ['ccusage', 'blocks', '--token-limit', str(user_limit), '--active', '-j'],
             capture_output=True,
             text=True,
             timeout=5,
@@ -197,39 +356,39 @@ def get_session_limit_progress():
             
             if blocks and blocks[0].get('isActive'):
                 block = blocks[0]
+                
+                # 获取进度百分比
+                progress_info = ""
                 token_limit_status = block.get('tokenLimitStatus', {})
-                
-                # 使用当前已使用的token数计算五小时限额使用率
-                if 'limit' in token_limit_status:
-                    limit = token_limit_status.get('limit', 0)
-                    total_tokens = block.get('totalTokens', 0)
+                if 'percentUsed' in token_limit_status:
+                    percent_used_raw = token_limit_status.get('percentUsed', 0)
+                    percent_used = min(100, round(percent_used_raw))
                     
-                    if limit > 0 and total_tokens > 0:
-                        percent_used_raw = (total_tokens * 100) / limit
-                        percent_used = min(100, round(percent_used_raw))
-                        
-                        # 调试输出具体数值
-                        debug_log(f"橙色进度条计算(五小时限额): total_tokens={total_tokens}, limit={limit}, 百分比={percent_used_raw:.2f}%, 四舍五入={percent_used}%")
-                        progress_bar = PROGRESS_BARS.get(percent_used, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
-                        return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percent_used}%\033[0m"
-                
-                # 备用方案：使用projection数据
+                    debug_log(f"会员模式进度条: 限额={user_limit}, 使用率={percent_used_raw:.2f}%, 四舍五入={percent_used}%")
+                    progress_bar = PROGRESS_BARS.get(percent_used, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+                    progress_info = f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percent_used}%\033[0m"
                 else:
-                    total_tokens = block.get('totalTokens', 0)
-                    projection = block.get('projection', {})
-                    projected_tokens = projection.get('totalTokens', 0)
-                    
-                    if projected_tokens > 0 and total_tokens > 0:
-                        percent_used = min(100, round((total_tokens * 100) / projected_tokens))
-                        # 调试输出具体数值
-                        debug_log(f"橙色进度条计算(projection): total_tokens={total_tokens}, projected_tokens={projected_tokens}, 百分比={(total_tokens * 100) / projected_tokens:.2f}%, 四舍五入={percent_used}%")
-                        progress_bar = PROGRESS_BARS.get(percent_used, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
-                        return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percent_used}%\033[0m"
+                    progress_info = "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+                
+                # 获取时间段信息
+                start_time = block.get('startTime', '')
+                end_time = block.get('endTime', '')
+                time_info = ""
+                
+                if start_time and end_time:
+                    formatted_time = format_session_time(start_time, end_time, TIMEZONE)
+                    time_info = f"\033[38;5;208m{formatted_time}\033[0m"
+                else:
+                    time_info = "\033[38;5;208mN/A\033[0m"
+                
+                return progress_info, time_info
         
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+        # 默认返回值
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m", "\033[38;5;208mN/A\033[0m"
         
-    except Exception:
-        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
+    except Exception as e:
+        debug_log(f"获取会员信息时出错: {e}")
+        return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m", "\033[38;5;208mN/A\033[0m"
 
 def get_ccusage_data():
     """获取ccusage的费用数据"""
@@ -369,6 +528,7 @@ def main():
         # 从stdin读取JSON输入
         input_data = sys.stdin.read()
         debug_log(f"读取到输入数据: {input_data[:100]}...")
+        debug_log(f"配置模式: 会员模式={IS_SUBSCRIPTION_MODE}, 会员类型={SUBSCRIPTION_TYPE}, 时区={TIMEZONE}")
         
         if not input_data:
             debug_log("没有输入数据")
@@ -378,27 +538,32 @@ def main():
         data = json.loads(input_data)
         debug_log(f"解析JSON成功: {data}")
         
-        # 获取各项信息
+        # 获取模型信息
         model = get_model_name(data)
         debug_log(f"模型名称: {model}")
         
-        context_tokens = get_session_tokens(data)  # 蓝色进度条（会话上下文）
+        # 获取会话token进度（蓝色，两种模式都显示）
+        context_tokens = get_session_tokens(data)
         debug_log(f"上下文进度条: {context_tokens}")
         
-        limit_tokens = get_session_limit_progress()  # 橙色进度条（会话限额）
-        debug_log(f"限额进度条: {limit_tokens}")
-        
-        cost = get_cost()
-        debug_log(f"费用信息: {cost}")
-        
-        # 使用ANSI颜色代码格式化输出
         # 模型名称 - 蓝色
         model_colored = f"\033[0;38;2;91;155;214m{model}\033[0m"
-        # 费用信息 - 黄色
-        cost_colored = f"\033[0;38;5;178m{cost}\033[0m"
         
-        # 输出格式化的状态行: 模型名字 + 蓝色进度条 + 橙色进度条 + 费用信息
-        print(f"{model_colored}  {context_tokens}  {limit_tokens}  {cost_colored}")
+        if IS_SUBSCRIPTION_MODE:
+            # 会员模式: 模型 + 会话tokens(蓝色) + 橙色进度条 + 时间段
+            limit_progress, session_time = get_subscription_info()
+            debug_log(f"会员模式 - 限额进度条: {limit_progress}")
+            debug_log(f"会员模式 - 会话时间: {session_time}")
+            
+            print(f"{model_colored}  {context_tokens}  {limit_progress}  {session_time}")
+        else:
+            # 非会员模式: 模型 + 会话tokens(蓝色) + 费用分析(黄色)
+            cost = get_cost()
+            debug_log(f"非会员模式 - 费用信息: {cost}")
+            
+            # 费用信息 - 黄色
+            cost_colored = f"\033[0;38;5;178m{cost}\033[0m"
+            print(f"{model_colored}  {context_tokens}  {cost_colored}")
         
     except json.JSONDecodeError as e:
         # JSON解析失败时的默认输出
