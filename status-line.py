@@ -114,14 +114,15 @@ def get_session_tokens(data):
         
         if total_tokens > 0:
             # 基于200k计算使用百分比
-            used_percentage = min(100, round((total_tokens * 100) / 200000))
+            actual_percentage = round((total_tokens * 100) / 200000)
+            display_percentage = min(100, actual_percentage)
             
-            debug_log(f"蓝色进度条计算: tokens={total_tokens}, 200k限制, 百分比={used_percentage}%")
+            debug_log(f"蓝色进度条计算: tokens={total_tokens}, 200k限制, 实际百分比={actual_percentage}%, 显示百分比={display_percentage}%")
             
-            progress_bar = PROGRESS_BARS.get(used_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+            progress_bar = PROGRESS_BARS.get(display_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
             
-            # 返回蓝色的进度条
-            return f"\033[0;34m{progress_bar}\033[0m \033[0;34m{used_percentage}%\033[0m"
+            # 返回蓝色的进度条，百分比显示实际值
+            return f"\033[0;34m{progress_bar}\033[0m \033[0;34m{actual_percentage}%\033[0m"
         else:
             return "\033[0;34m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[0;34m0%\033[0m"
             
@@ -173,16 +174,18 @@ def get_blocks_comparison():
             active_tokens = active_block.get('totalTokens', 0)
             
             if max_tokens == 0:
-                percentage = 0
+                actual_percentage = 0
             else:
-                percentage = min(100, round((active_tokens * 100) / max_tokens))
+                actual_percentage = round((active_tokens * 100) / max_tokens)
             
-            debug_log(f"橙色进度条计算: active_tokens={active_tokens}, max_tokens={max_tokens}, 百分比={percentage}%")
+            display_percentage = min(100, actual_percentage)
             
-            progress_bar = PROGRESS_BARS.get(percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+            debug_log(f"橙色进度条计算: active_tokens={active_tokens}, max_tokens={max_tokens}, 实际百分比={actual_percentage}%, 显示百分比={display_percentage}%")
             
-            # 返回橙色的进度条
-            return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{percentage}%\033[0m"
+            progress_bar = PROGRESS_BARS.get(display_percentage, "\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m")
+            
+            # 返回橙色的进度条，百分比显示实际值
+            return f"\033[38;5;208m{progress_bar}\033[0m \033[38;5;208m{actual_percentage}%\033[0m"
         
         # 默认返回值
         return "\033[38;5;208m\033[38;5;240m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\033[0m\033[0m \033[38;5;208m0%\033[0m"
