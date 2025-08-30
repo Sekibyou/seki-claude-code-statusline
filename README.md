@@ -2,6 +2,8 @@
 
 一个用于 Claude Code 的自定义状态栏工具，实时显示模型信息、token使用情况和费用统计。
 
+> 💡 **灵感来源：** [neo-claude-code-statusline](https://github.com/neorena-dev/neo-claude-code-statusline)
+
 ## 功能特性
 
 状态栏显示格式：
